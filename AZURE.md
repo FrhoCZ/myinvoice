@@ -5,6 +5,10 @@ This guide walks through running MyInvoice.cz on **Azure Functions** using the
 feature, where PHP acts as the HTTP backend and the Functions runtime proxies
 requests to it.
 
+> **Lowest cost option**: Functions (Consumption) + MySQL Serverless costs
+> **~€2–8/month** — you pay only when the app is actively used. See
+> [Scenario A — Pay-per-use](#scenario-a--pay-per-use-recommended) below.
+
 > **Tip — simpler alternative**: If you prefer a fully managed web host without
 > serverless constraints, **Azure App Service** (Linux, PHP 8.2 stack) can run
 > the existing Docker image with zero code changes. See the final section.
@@ -57,20 +61,75 @@ All prices are **West Europe** region, pay-as-you-go, as of mid-2025.
 Actual bills depend on usage. Use the
 [Azure Pricing Calculator](https://azure.microsoft.com/pricing/calculator/) to model your own scenario.
 
-### Scenario A — Minimal (solo freelancer, light usage)
+### Scenario A — Pay-per-use (recommended)
+
+The cheapest option. **You pay only when the app is actively used** — both the
+compute and the database pause automatically during idle periods.
 
 | Service | SKU | Est. monthly cost |
 |---------|-----|-------------------|
-| Azure Functions | Consumption plan (first 1M executions free, then ~€0.17/M) | **€0 – €1** |
+| Azure Functions | Consumption plan — first 1M requests/month free, then ~€0.17/M | **€0** |
+| Azure Database for MySQL | Flexible Server — **Serverless** (auto-pause after 1h idle), 2 vCore max, 20 GB | **~€2 – €8** |
+| Storage account (required by Functions) | LRS, 5 GB | **~€0.10** |
+| **Total** | | **~€2 – €8 / month** |
+
+**Trade-offs:**
+- First request after an idle period takes **10–30 seconds** while the database
+  resumes (subsequent requests are fast). Acceptable for personal or low-traffic use.
+- No Redis — sessions and rate-limit state use the database (automatic fallback).
+- Compute is always free within 1M requests/month; the database vCore-seconds
+  are billed only while queries are running.
+
+**Create MySQL in Serverless mode** (replaces the Burstable command in step 4):
+
+```bash
+az mysql flexible-server create \
+  --name myinvoice-db \
+  --resource-group myinvoice-rg \
+  --location westeurope \
+  --admin-user myinvoiceadmin \
+  --admin-password "<strong-password>" \
+  --tier GeneralPurpose \
+  --sku-name Standard_D2ads_v5 \
+  --storage-size 20 \
+  --version 8.0
+
+# Enable serverless auto-scale with auto-pause after 1 hour of inactivity
+az mysql flexible-server update \
+  --name myinvoice-db \
+  --resource-group myinvoice-rg \
+  --scale-up-time 60 \
+  --enable-storage-autogrow Enabled
+
+az mysql flexible-server stop \
+  --name myinvoice-db \
+  --resource-group myinvoice-rg
+# Note: use the Azure portal to enable "Compute auto-scaling" and
+# "Auto-pause" on the server after creation — the CLI support for
+# these options may vary by az version.
+```
+
+> **Tip**: MySQL Serverless auto-pause is configured in the Azure portal under
+> the server → **Compute + storage** → enable **Compute auto-scale** and set
+> **Auto-pause delay** to 60 minutes.
+
+---
+
+### Scenario B — Always-on solo (no cold starts)
+
+| Service | SKU | Est. monthly cost |
+|---------|-----|-------------------|
+| Azure Functions | Consumption plan | **€0 – €1** |
 | Azure Database for MySQL | Flexible Server — B1ms (1 vCore, 2 GB RAM, 20 GB storage) | **~€13** |
-| Azure Cache for Redis | Basic C0 (250 MB) | **~€14** |
-| Storage account (logs/backups) | LRS, 5 GB | **~€0.10** |
-| **Total** | | **~€27 – €28 / month** |
+| Storage account | LRS, 5 GB | **~€0.10** |
+| **Total** | | **~€13 – €14 / month** |
 
-> Redis is optional. Without it, session and rate-limit state falls back to the
-> database. You can skip Redis for very low traffic and save ~€14/month.
+Database runs 24/7 — no cold-start delay. Redis is omitted; add Basic C0
+(~€14/month) if you want faster sessions and rate-limit counters under load.
 
-### Scenario B — Small team (3–5 users, moderate usage)
+---
+
+### Scenario C — Small team (3–5 users, moderate usage)
 
 | Service | SKU | Est. monthly cost |
 |---------|-----|-------------------|
@@ -81,7 +140,9 @@ Actual bills depend on usage. Use the
 | Azure Communication Services (email) | 10k emails/month free | **€0** |
 | **Total** | | **~€93 – €97 / month** |
 
-### Scenario C — App Service instead of Functions (recommended for always-on)
+---
+
+### Scenario D — App Service instead of Functions (always-on, no cold starts)
 
 | Service | SKU | Est. monthly cost |
 |---------|-----|-------------------|
@@ -144,6 +205,29 @@ az functionapp create \
 
 ### 4. Create Azure Database for MySQL (Flexible Server)
 
+**Option A — Serverless (pay-per-use, recommended for personal use)**
+
+Auto-pauses after 1 hour of inactivity. First request after a pause takes
+10–30 seconds while the database resumes.
+
+```bash
+az mysql flexible-server create \
+  --name myinvoice-db \
+  --resource-group myinvoice-rg \
+  --location westeurope \
+  --admin-user myinvoiceadmin \
+  --admin-password "<strong-password>" \
+  --tier GeneralPurpose \
+  --sku-name Standard_D2ads_v5 \
+  --storage-size 20 \
+  --version 8.0
+```
+
+After creation, enable auto-pause in the Azure portal:
+**myinvoice-db → Compute + storage → Compute auto-scale → Auto-pause delay: 60 min**
+
+**Option B — Always-on Burstable (no cold starts, ~€13/month)**
+
 ```bash
 az mysql flexible-server create \
   --name myinvoice-db \
@@ -153,7 +237,7 @@ az mysql flexible-server create \
   --admin-password "<strong-password>" \
   --sku-name Standard_B1ms \
   --tier Burstable \
-  --storage-size 32 \
+  --storage-size 20 \
   --version 8.0
 ```
 
