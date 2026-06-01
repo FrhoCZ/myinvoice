@@ -1,0 +1,65 @@
+name: Deploy to Azure Functions
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # Set these in repository Settings → Secrets and variables → Actions
+  AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}   # e.g. myinvoice-func
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── PHP / Composer ──────────────────────────────────────────────────────
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_mysql, mbstring, intl, gd, zip, redis
+          coverage: none
+
+      - name: Install PHP dependencies
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+        working-directory: api
+
+      # ── Node.js / pnpm / Vue build ──────────────────────────────────────────
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: web
+
+      - name: Build frontend
+        run: pnpm build
+        working-directory: web
+
+      - name: Copy built assets to api/public
+        run: |
+          mkdir -p api/public/assets
+          cp -r web/dist/. api/public/
+
+      # ── Deploy ──────────────────────────────────────────────────────────────
+      - name: Deploy to Azure Functions
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+          # For RBAC-based auth, replace publish-profile with:
+          # scm-do-build-during-deployment: false
