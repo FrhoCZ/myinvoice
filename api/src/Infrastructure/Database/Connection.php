@@ -33,9 +33,20 @@ final class Connection
             ];
 
             $sslCa = (string) $this->config->get('db.ssl_ca', '');
+
+            // Azure Database for MySQL requires SSL/TLS connections
+            $isAzureMySQL = str_contains($host, '.mysql.database.azure.com');
+
             if ($sslCa !== '') {
                 $options[PDO::MYSQL_ATTR_SSL_CA]     = $sslCa;
                 $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
+            } elseif ($isAzureMySQL) {
+                throw new \RuntimeException(
+                    'Azure Database for MySQL requires SSL certificate verification. ' .
+                    'Set MYINVOICE_DB_SSL_CA to the path of DigiCertGlobalRootG2.crt.pem. ' .
+                    'Download it from https://dl.cacerts.digicert.com/DigiCertGlobalRootG2.crt.pem ' .
+                    'and bundle it in your deployment package.'
+                );
             }
 
             $this->pdo = new PDO($dsn, $user, $pass, $options);

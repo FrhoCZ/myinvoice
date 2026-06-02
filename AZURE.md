@@ -94,19 +94,15 @@ az mysql flexible-server create \
   --storage-size 20 \
   --version 8.0
 
-# Enable serverless auto-scale with auto-pause after 1 hour of inactivity
+# Enable storage auto-grow
 az mysql flexible-server update \
   --name myinvoice-db \
   --resource-group myinvoice-rg \
-  --scale-up-time 60 \
-  --enable-storage-autogrow Enabled
+  --storage-auto-grow Enabled
 
-az mysql flexible-server stop \
-  --name myinvoice-db \
-  --resource-group myinvoice-rg
-# Note: use the Azure portal to enable "Compute auto-scaling" and
-# "Auto-pause" on the server after creation — the CLI support for
-# these options may vary by az version.
+# Note: Auto-pause and compute auto-scaling must be configured via the
+# Azure portal. Use the portal to enable "Compute auto-scale" and set
+# "Auto-pause delay" to 60 minutes under Compute + storage settings.
 ```
 
 > **Tip**: MySQL Serverless auto-pause is configured in the Azure portal under
@@ -262,15 +258,19 @@ az mysql flexible-server firewall-rule create \
   --end-ip-address 0.0.0.0
 ```
 
-Download the SSL CA bundle required by Azure MySQL:
+Download the SSL CA bundle required by Azure MySQL and include it in your deployment:
 
 ```bash
+# Download the certificate to your project root
 curl -o DigiCertGlobalRootG2.crt.pem \
   https://dl.cacerts.digicert.com/DigiCertGlobalRootG2.crt.pem
 ```
 
-Upload it to the Function App filesystem (or bundle it in the deployment package)
-and set `MYINVOICE_DB_SSL_CA` to its absolute path.
+**Important**: Bundle the certificate file in your deployment package (place it at
+the project root or in the `api/` directory). Azure Functions uses an ephemeral
+filesystem — files uploaded separately may be lost on instance recycle. Set
+`MYINVOICE_DB_SSL_CA` to the absolute path where the file will exist after
+deployment, e.g., `/home/site/wwwroot/DigiCertGlobalRootG2.crt.pem`.
 
 ### 5. Create Azure Cache for Redis (optional)
 
